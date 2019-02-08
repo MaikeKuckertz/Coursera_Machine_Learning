@@ -1,0 +1,150 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Maike Kuckertz"
+date: "8 2 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE)
+```
+
+#1. Task
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+## Introduction 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+#2. Data Loading and Processing
+```{r set directory, echo=FALSE}
+setwd("/Users/maikekuckertz/Dokumente/08_Coursera/Data Science/8_machine learning")
+```
+
+Load Packages:
+```{r packages, warning=FALSE, cache=FALSE}
+library(knitr)
+library(caret)
+library(dplyr)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+```
+
+Load Data:
+```{r download, cache=TRUE}
+#read training data
+URLtraining <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+filetrain <- "./training.csv"
+if(!file.exists(filetrain))
+   {download.file(URLtraining, destfile = filetrain, method = "curl")}
+training <- read.csv(filetrain)
+ 
+#read testing data
+URLtesting <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+filetest <- "./testing.csv"
+if(!file.exists(filetest))
+   {download.file(URLtesting, destfile = filetest, method = "curl")}
+testing <- read.csv(filetest)
+
+rm(URLtraining, URLtesting, filetrain, filetest)
+```
+
+#3. Prediction
+
+###3.1. Split training data set:
+```{r Data Partition, cache=TRUE}
+# create a partition using caret with the training dataset on 70,30 ratio
+inTrain  <- createDataPartition(training$classe, p=0.7, list=FALSE)
+TrainSet <- training[inTrain, ]
+TestSet  <- training[-inTrain, ]
+
+rm(inTrain)
+```
+
+Cleaning of NA and Non Zero Values:
+```{r cleaning, cache=TRUE}
+#remove NZV
+NZV <- nearZeroVar(TrainSet)
+TrainSet <- TrainSet[, -NZV]
+TestSet  <- TestSet[, -NZV]
+# remove variables that are mostly NA
+allNA    <- sapply(TrainSet, function(x) mean(is.na(x))) > 0.95
+TrainSet <- TrainSet[, allNA==FALSE]
+TestSet  <- TestSet[, allNA==FALSE]
+# remove identification colums 1 to 5
+TrainSet <- TrainSet[, -(1:5)]
+TestSet  <- TestSet[, -(1:5)]
+
+rm(allNA, NZV)
+```
+
+Exploratory Analysis
+```{r frequency, cache=TRUE}
+qplot(TrainSet$classe, xlab="Classe", ylab="frequency",main="Frequency of different excercise classes")
+```
+
+###3.2 Build a model on the training set
+In order to find best model fit, we need to examine different algorithms and compare the accuracy of the models to each other
+
+####Random Forest
+```{r random forest, cache=TRUE}
+set.seed(301)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFitRandForest <- train(classe ~ ., data=TrainSet, method="rf",
+                          trControl=controlRF)
+modFitRandForest$finalModel
+# prediction on Test dataset
+predictRandForest <- predict(modFitRandForest, newdata=TestSet)
+confMatRandForest <- confusionMatrix(predictRandForest, TestSet$classe)
+confMatRandForest
+# plot matrix results
+plot(confMatRandForest$table, col = confMatRandForest$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confMatRandForest$overall['Accuracy'], 4)))
+```
+
+####Decision Tree
+```{r decision tree, cache=TRUE}
+# model fit
+set.seed(301)
+modFitDecTree <- rpart(classe ~ ., data=TrainSet, method="class")
+fancyRpartPlot(modFitDecTree)
+# prediction on Test dataset
+predictDecTree <- predict(modFitDecTree, newdata=TestSet, type="class")
+confMatDecTree <- confusionMatrix(predictDecTree, TestSet$classe)
+confMatDecTree
+# plot matrix results
+plot(confMatDecTree$table, col = confMatDecTree$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+                  round(confMatDecTree$overall['Accuracy'], 4)))
+```
+
+####Generalized Boosted Model
+```{r gbm, cache=TRUE}
+# model fit
+set.seed(301)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=TrainSet, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modFitGBM$finalModel
+# prediction on Test dataset
+predictGBM <- predict(modFitGBM, newdata=TestSet)
+confMatGBM <- confusionMatrix(predictGBM, TestSet$classe)
+confMatGBM
+# plot matrix results
+plot(confMatGBM$table, col = confMatGBM$byClass, 
+     main = paste("GBM - Accuracy =", round(confMatGBM$overall['Accuracy'], 4)))
+```
+
+The random Forest algorithm gives the best accuracy with a 0.9909735 mean accuracy. Therefore we will go on with this approach.
+
+
+###3.3 Final prediction on Test Set
+```{r evaluation, cache=TRUE}
+predictTest <- predict(modFitRandForest, newdata=testing)
+predictTest
+```
+
+
